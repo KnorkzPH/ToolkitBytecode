@@ -618,6 +618,7 @@ local AcrylicFolder, AcrylicDof
 local SavedDof = {}
 local AcrylicBind = "ToolkitUIAcrylic"
 local ACRYLIC_DISTANCE = 0.001
+Library.GlassBlurAdjust = { X = 0, Y = 0, W = 0, H = 0 }   -- manual fine-tune in pixels if your executor is off by a few px
 
 local function DofStrength() return math.clamp(Library.GlassBlurSize / 20, 0, 1) end
 
@@ -651,9 +652,15 @@ local function PlaceAcrylicRect(Part, Cam, X, Y, W, H)
 		Part.Parent = nil
 		return
 	end
+	-- every corner is projected onto ONE flat plane in front of the camera (perpendicular to where it looks),
+	-- so the part lines up with the frame at any position on screen (the old sphere-distance version drifted off-centre)
+	local CF = Cam.CFrame
+	local Look = CF.LookVector
 	local function ToWorld(P)
 		local R = Cam:ViewportPointToRay(P.X, P.Y)
-		return R.Origin + R.Direction * ACRYLIC_DISTANCE
+		local Dir = R.Direction
+		local T = (ACRYLIC_DISTANCE - (R.Origin - CF.Position):Dot(Look)) / Dir:Dot(Look)
+		return R.Origin + Dir * T
 	end
 	local TL = ToWorld(Vector2.new(X, Y))
 	local TR = ToWorld(Vector2.new(X + W, Y))
@@ -673,7 +680,9 @@ local function AcrylicRender()
 		if not (M and M.Parent) then
 			for _, P in ipairs(Set) do P.Parent = nil end
 		else
-			local Pos, Size = M.AbsolutePosition, M.AbsoluteSize
+			local Adj = Library.GlassBlurAdjust
+			local Pos = M.AbsolutePosition + Vector2.new(Adj.X, Adj.Y)
+			local Size = M.AbsoluteSize + Vector2.new(Adj.W, Adj.H)
 			local Scale = Win.RootScale and Win.RootScale.Scale or 1
 			local R = math.min(MAIN_RADIUS * Scale, Size.X / 2, Size.Y / 2)
 			local K = ACRYLIC_STRIPS
@@ -797,6 +806,11 @@ function Library:IsGlassmorphismSupported() return Library.IsPC end
 function Library:SetGlassBlur(Size)
 	Library.GlassBlurSize = math.clamp(tonumber(Size) or 6, 0, 40)
 	UpdateGlassBlur()
+end
+
+-- Fine-tune the blur frame in pixels: X / Y move it, W / H grow or shrink it (all optional, default 0)
+function Library:SetGlassBlurAdjust(X, Y, W, H)
+	Library.GlassBlurAdjust = { X = tonumber(X) or 0, Y = tonumber(Y) or 0, W = tonumber(W) or 0, H = tonumber(H) or 0 }
 end
 
 -- Lens / refraction edge strength on the glass (0 = none, 1 = strong)
@@ -3055,6 +3069,7 @@ function Window:IsGlassmorphismSupported() return Library:IsGlassmorphismSupport
 function Window:SetGlassBlur(V) Library:SetGlassBlur(V) end
 function Window:SetGlassBlurMode(V) Library:SetGlassBlurMode(V) end
 function Window:SetGlassDistortion(V) Library:SetGlassDistortion(V) end
+function Window:SetGlassBlurAdjust(X, Y, W, H) Library:SetGlassBlurAdjust(X, Y, W, H) end
 
 function Window:Tag(O)
 	if type(O) == "string" then O = { Title = O } end

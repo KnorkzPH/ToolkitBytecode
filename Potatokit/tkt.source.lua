@@ -358,6 +358,26 @@ function FX.SetDistortion(D)
 	end
 end
 
+-- BlurFrame: a real Frame inside the main frame, exactly the same size and corners as it. The acrylic blur is built from
+-- THIS frame's position and size, and it carries the soft dark acrylic tint while glassmorphism is on.
+FX.BlurFrames = setmetatable({}, { __mode = "k" })
+function FX.BlurFrame(Parent, R)
+	local F = New("Frame", {
+		Name = "BlurFrame", Position = UDim2.fromScale(0, 0), Size = UDim2.fromScale(1, 1), BackgroundColor3 = Color3.new(0, 0, 0),
+		BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1, Active = false,
+	}, Parent)
+	Corner(F, R)
+	FX.BlurFrames[F] = true
+	if Library.GlassEffective then F.BackgroundTransparency = 0.82 end
+	return F
+end
+
+function FX.SetBlurFrames(V)
+	for F in pairs(FX.BlurFrames) do
+		if F.Parent then Tween(F, 0.3, { BackgroundTransparency = V and 0.82 or 1 }) else FX.BlurFrames[F] = nil end
+	end
+end
+
 function FX.SetLiquid(V)
 	for Holder in pairs(FX.Liquids) do
 		if Holder.Parent then Holder.Visible = V else FX.Liquids[Holder] = nil end
@@ -676,7 +696,7 @@ local function AcrylicRender()
 	local Cam = workspace.CurrentCamera
 	if not Cam then return end
 	for Win, Set in pairs(AcrylicParts) do
-		local M = Win.Main
+		local M = Win.BlurFrame or Win.Main
 		if not (M and M.Parent) then
 			for _, P in ipairs(Set) do P.Parent = nil end
 		else
@@ -747,7 +767,7 @@ local function NewAcrylicPart()
 end
 
 local function AddAcrylic(Win)
-	if AcrylicParts[Win] or not Win.Main then return end
+	if AcrylicParts[Win] or not (Win.BlurFrame or Win.Main) then return end
 	if not EnsureAcrylicRig() then return end
 	local Set = {}
 	for I = 1, ACRYLIC_STRIPS * 2 + 1 do Set[I] = NewAcrylicPart() end
@@ -795,6 +815,7 @@ function Library:SetGlassmorphism(V)
 	end
 	Library.GlassEffective = Library.Glassmorphism and Library.IsPC
 	FX.SetLiquid(Library.GlassEffective)
+	FX.SetBlurFrames(Library.GlassEffective)
 	Library:SetBackgroundTransparency(Library.BackgroundTransparency)
 	UpdateGlassBlur()
 	return Library.GlassEffective
@@ -3573,6 +3594,7 @@ function Library:CreateWindow(O)
 	FX.Liquid(Main, MAIN_RADIUS, "Full")
 	FX.RealGlass(Main, MAIN_RADIUS, "Main")
 	Win.Main = Main
+	Win.BlurFrame = FX.BlurFrame(Main, MAIN_RADIUS)
 	Library._UpdateGlassBlur()
 
 	local Background = New("CanvasGroup", { Name = "Background", Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1, BorderSizePixel = 0, ZIndex = 1 }, Main)

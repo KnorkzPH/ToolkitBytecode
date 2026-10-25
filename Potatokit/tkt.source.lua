@@ -259,7 +259,8 @@ end
 -- ============================================================================
 Library.Glassmorphism = false          -- what the user asked for
 Library.GlassEffective = false         -- what is really drawn (asked for AND running on PC)
-Library.GlassBlurSize = 16             -- 0 = no backdrop blur
+Library.GlassBlurSize = 6              -- 0 = no backdrop blur (low by default: mostly clear glass with a light blur)
+Library.GlassDistortion = 0.6          -- 0-1: strength of the lens / refraction edge on the glass
 do
 	local U = UserInputService
 	Library.IsPC = (not U.TouchEnabled) or (U.KeyboardEnabled and U.MouseEnabled)
@@ -270,6 +271,16 @@ FX.Liquids = setmetatable({}, { __mode = "k" })
 local LiquidTintAlpha = NSeq({ { 0, 0.9 }, { 0.3, 0.95 }, { 0.7, 0.975 }, { 1, 0.99 } })
 local StreakAlphaA = NSeq({ { 0, 1 }, { 0.36, 1 }, { 0.5, 0.88 }, { 0.64, 1 }, { 1, 1 } })
 local StreakAlphaB = NSeq({ { 0, 1 }, { 0.42, 1 }, { 0.52, 0.94 }, { 0.62, 1 }, { 1, 1 } })
+-- Lens edge: light bends near the rim of real glass, so the edge gets a bright, soft band that fades inward
+-- (stronger on the top-left, softer on the bottom-right). Peak scales each band; D is Library.GlassDistortion.
+local function LensSeq(D, Peak)
+	local Pts = { { 0, 0.55 }, { 0.3, 0.2 }, { 0.55, 0.04 }, { 0.8, 0.2 }, { 1, 0.45 } }
+	local K = {}
+	for I, P in ipairs(Pts) do
+		K[I] = NumberSequenceKeypoint.new(P[1], math.clamp(1 - P[2] * Peak * D, 0, 1))
+	end
+	return NumberSequence.new(K)
+end
 local SpecAlpha = NSeq({ { 0, 1 }, { 0.18, 0.55 }, { 0.5, 0.15 }, { 0.82, 0.55 }, { 1, 1 } })
 
 -- Kind: "Full" (tint + streaks + rim + specular line) or "Light" (tint + rim + specular line, nothing animated)
@@ -312,6 +323,22 @@ function FX.Liquid(Parent, R, Kind)
 	Corner(Rim, math.max(R - 2, 1))
 	Stroke(Rim, White, 1, 0.1, "Soft")
 
+	-- lens / refraction edge (three soft bands of different widths, strength = Library.GlassDistortion)
+	if Full then
+		Rec.Lens = {}
+		for _, B in ipairs({ { 10, 0.4 }, { 5, 0.7 }, { 2, 1.2 } }) do
+			local T, Peak = B[1], B[2]
+			local Band = New("Frame", {
+				Name = "LensEdge", Position = UDim2.fromOffset(T, T), Size = UDim2.new(1, -T * 2, 1, -T * 2), BackgroundTransparency = 1,
+				BorderSizePixel = 0, ZIndex = 3, Active = false,
+			}, Holder)
+			Corner(Band, math.max(R - T, 1))
+			local St = New("UIStroke", { Color = White, Thickness = T, ApplyStrokeMode = Enum.ApplyStrokeMode.Border, Transparency = 0 }, Band)
+			local G = New("UIGradient", { Rotation = 135, Transparency = LensSeq(Library.GlassDistortion, Peak) }, St)
+			table.insert(Rec.Lens, { Grad = G, Peak = Peak })
+		end
+	end
+
 	-- specular line along the top edge
 	local Spec = New("Frame", {
 		Name = "Specular", Position = UDim2.new(0, R, 0, 1), Size = UDim2.new(1, -R * 2, 0, 1), BackgroundColor3 = White,
@@ -321,6 +348,14 @@ function FX.Liquid(Parent, R, Kind)
 
 	FX.Liquids[Holder] = Rec
 	return Holder
+end
+
+function FX.SetDistortion(D)
+	for Holder, Rec in pairs(FX.Liquids) do
+		if Holder.Parent and Rec.Lens then
+			for _, L in ipairs(Rec.Lens) do L.Grad.Transparency = LensSeq(D, L.Peak) end
+		end
+	end
 end
 
 function FX.SetLiquid(V)
@@ -439,7 +474,7 @@ local function Glass(Normal, Clear)
 	return function()
 		if not Library.Transparent then return Normal end
 		-- glassmorphism: more see-through so the backdrop blur shows through
-		if Library.GlassEffective then return Clear + (1 - Clear) * 0.4 end
+		if Library.GlassEffective then return Clear + (1 - Clear) * 0.5 end
 		return Clear
 	end
 end
@@ -760,8 +795,14 @@ function Library:IsGlassmorphismSupported() return Library.IsPC end
 
 -- Acrylic blur strength for glassmorphism (0 = off, max 40)
 function Library:SetGlassBlur(Size)
-	Library.GlassBlurSize = math.clamp(tonumber(Size) or 16, 0, 40)
+	Library.GlassBlurSize = math.clamp(tonumber(Size) or 6, 0, 40)
 	UpdateGlassBlur()
+end
+
+-- Lens / refraction edge strength on the glass (0 = none, 1 = strong)
+function Library:SetGlassDistortion(V)
+	Library.GlassDistortion = math.clamp(tonumber(V) or 0.6, 0, 1)
+	FX.SetDistortion(Library.GlassDistortion)
 end
 
 -- "Window" (default, blurs only the main window area) or "Screen" (blurs the whole game view)
@@ -3013,6 +3054,7 @@ function Window:SetGlassmorphism(V) return Library:SetGlassmorphism(V) end
 function Window:IsGlassmorphismSupported() return Library:IsGlassmorphismSupported() end
 function Window:SetGlassBlur(V) Library:SetGlassBlur(V) end
 function Window:SetGlassBlurMode(V) Library:SetGlassBlurMode(V) end
+function Window:SetGlassDistortion(V) Library:SetGlassDistortion(V) end
 
 function Window:Tag(O)
 	if type(O) == "string" then O = { Title = O } end
@@ -3437,7 +3479,8 @@ function Library:CreateWindow(O)
 	if O.Reflections ~= nil then Library:SetReflections(O.Reflections) end
 	if O.GlassModule ~= nil then Library:SetGlassProvider(O.GlassModule, O.GlassOptions) end
 	if O.GlassBlurMode ~= nil then Library.GlassBlurMode = (tostring(O.GlassBlurMode):lower() == "screen") and "Screen" or "Window" end
-	if O.GlassBlur ~= nil then Library.GlassBlurSize = math.clamp(tonumber(O.GlassBlur) or 16, 0, 40) end
+	if O.GlassBlur ~= nil then Library.GlassBlurSize = math.clamp(tonumber(O.GlassBlur) or 6, 0, 40) end
+	if O.GlassDistortion ~= nil then Library.GlassDistortion = math.clamp(tonumber(O.GlassDistortion) or 0.6, 0, 1) end
 	-- Glassmorphism = true turns the PC-only liquid glass on at start (optional, default off)
 	if O.Glassmorphism ~= nil then Library:SetGlassmorphism(O.Glassmorphism) end
 

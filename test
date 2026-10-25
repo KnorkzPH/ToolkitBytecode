@@ -1,0 +1,1880 @@
+local Toolkit = loadstring(game:HttpGet("https://raw.githubusercontent.com/KnorkzPH/ToolkitBytecode/refs/heads/main/Potatokit/tkt.source.lua"))()
+
+local NotifW, NotifH = 225, 85
+Toolkit:SetNotificationSize(NotifW, NotifH)
+
+local StartTransparent = true
+local StartOpacity = 1
+
+local Window = Toolkit:CreateWindow({
+    Title = "Toolkit",
+    Author = "By Knorkzikii",
+    Icon = "solar:widget-5-bold",
+    ToggleKey = Enum.KeyCode.RightShift,
+    ShowIntro = true,
+    Folder = "ToolkitUI",
+    Transparent = StartTransparent,
+    Opacity = StartOpacity,
+    MovingAnimation = true,
+    ConfirmClose = true,
+    User = {
+        Enabled = true,
+        Anonymous = false,
+        Callback = function() end
+    },
+    KeySystem = {
+        Enabled = false,
+        Key = { "key1", "key2" },
+        URL = "https://link",
+        SaveKey = false,
+        Note = "Get your key",
+    },
+    NotificationPosition = "Right",
+    NotificationWidth = NotifW,
+    NotificationHeight = NotifH,
+    TipsNotify = true,
+    Tips = {
+        Delay = 4,
+        Title = "Tips",
+        Content = "UI loaded. Press RightShift to hide/show.",
+        Icon = "solar:lightbulb-bold",
+        Duration = 5,
+    },
+    Loading = {
+        Title = "Toolkit",
+        Status = "Initializing",
+        WaitStatus = "Wait",
+        Subtitle = "Please wait",
+        Dots = true,
+        MinTime = 1.3,
+        MaxTime = 3,
+        Yield = true,
+    },
+})
+
+Window:OpenButton({
+    Icon = "solar:widget-5-bold",
+    Enabled = true,
+    Draggable = true,
+})
+
+Window:Tag({
+    Title = "v2.3.6",
+    Icon = "solar:tag-bold",
+    Color = "#22D3EE"
+})
+
+Window:Tag({
+    Title = "Hot",
+    Icon = "solar:fire-bold",
+    Color = "#FF8A4C",
+    TextColor = "#FFD2B5"
+})
+
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+
+------------------------------------------------------------------
+-- LIVE FPS | PING TAG (optional)
+-- Enabled = true  -> the tag is shown and updates every Interval seconds
+-- Enabled = false -> the tag is NOT created and NO loop / RenderStepped connection runs at all
+-- Colors accept a hex string ("#4ADE80") or a Color3. They can also be changed in Settings > FPS | Ping Tag.
+------------------------------------------------------------------
+local StatsConfig = {
+    Enabled = true,
+    Icon = "solar:cpu-bolt-bold",
+    Interval = 0.5,
+    Colors = {
+        Good = "#4ADE80",   -- healthy
+        Okay = "#FBBF24",   -- so-so
+        Bad = "#F87171",    -- bad
+    },
+    Thresholds = {
+        FpsBad = 30,        -- below this FPS = Bad
+        FpsOkay = 50,       -- below this FPS = Okay
+        PingBad = 250,      -- above this ping = Bad
+        PingOkay = 120,     -- above this ping = Okay
+    },
+}
+
+local function ToColor3(Value, Fallback)
+    if typeof(Value) == "Color3" then
+        return Value
+    end
+
+    if type(Value) == "string" then
+        local Ok, Result = pcall(Color3.fromHex, Value)
+
+        if Ok and Result then
+            return Result
+        end
+    end
+
+    return Fallback or Color3.new(1, 1, 1)
+end
+
+local StatsTag
+local StatsOn = false
+local StatsRun = 0
+local Frames, LastTick, LastLevel = 0, os.clock(), nil
+local FrameConn
+
+local function GetPing()
+    local Ok, Value = pcall(function()
+        return Stats.Network.ServerStatsItem["Data Ping"]:GetValue()
+    end)
+
+    return Ok and math.floor(Value + 0.5) or 0
+end
+
+-- While the tag is running this reads the live counter. When it is off nothing runs in the background,
+-- so FPS is sampled on demand over a few frames (only when a button asks for it).
+local function GetFPS()
+    if StatsOn then
+        return math.floor(Frames / math.max(os.clock() - LastTick, 0.001) + 0.5)
+    end
+
+    local Start = os.clock()
+
+    for _ = 1, 10 do
+        RunService.RenderStepped:Wait()
+    end
+
+    return math.floor(10 / math.max(os.clock() - Start, 0.001) + 0.5)
+end
+
+local function GetLevel(Fps, Ping)
+    local T = StatsConfig.Thresholds
+
+    if Fps < T.FpsBad or Ping > T.PingBad then
+        return "Bad"
+    elseif Fps < T.FpsOkay or Ping > T.PingOkay then
+        return "Okay"
+    end
+
+    return "Good"
+end
+
+local function ApplyStatsColor(Level)
+    if not StatsTag then
+        return
+    end
+
+    LastLevel = Level
+
+    pcall(function()
+        StatsTag:SetColor(ToColor3(StatsConfig.Colors[Level], Color3.new(1, 1, 1)))
+    end)
+end
+
+local function StopStats()
+    StatsOn = false
+    StatsRun += 1
+
+    if FrameConn then
+        FrameConn:Disconnect()
+        FrameConn = nil
+    end
+
+    if StatsTag then
+        pcall(function()
+            StatsTag:Destroy()
+        end)
+
+        StatsTag = nil
+    end
+
+    LastLevel = nil
+end
+
+local function StartStats()
+    if StatsOn then
+        return
+    end
+
+    StatsOn = true
+    StatsRun += 1
+
+    local Run = StatsRun
+
+    Frames, LastTick, LastLevel = 0, os.clock(), nil
+
+    StatsTag = Window:Tag({
+        Title = "-- FPS | --ms",
+        Icon = StatsConfig.Icon,
+        Color = ToColor3(StatsConfig.Colors.Good, Color3.new(1, 1, 1)),
+        MinWidth = 96,
+    })
+
+    FrameConn = RunService.RenderStepped:Connect(function()
+        Frames += 1
+    end)
+
+    task.spawn(function()
+        while StatsOn and Run == StatsRun do
+            task.wait(StatsConfig.Interval)
+
+            if not (StatsOn and Run == StatsRun) then
+                break
+            end
+
+            local Now = os.clock()
+            local Fps = math.floor(Frames / math.max(Now - LastTick, 0.001) + 0.5)
+
+            Frames, LastTick = 0, Now
+
+            local Ping = GetPing()
+            local Level = GetLevel(Fps, Ping)
+
+            pcall(function()
+                StatsTag:SetTitle(Fps .. " FPS | " .. Ping .. "ms")
+            end)
+
+            if Level ~= LastLevel then
+                ApplyStatsColor(Level)
+            end
+        end
+    end)
+end
+
+if StatsConfig.Enabled then
+    StartStats()
+end
+
+Window:Section({
+    Title = "Main"
+})
+
+local Home = Window:Tab({
+    Title = "Home",
+    Icon = "solar:home-2-bold",
+    Locked = false,
+})
+
+Home:Select()
+
+Home:Paragraph({
+    Title = "Welcome!",
+    Desc = "BETA",
+    Image = "solar:info-square-bold",
+    Color = "Blue",
+    Buttons = {
+        {
+            Title = "Discord",
+            Icon = "solar:link-bold",
+            Callback = function()
+                if setclipboard then
+                    setclipboard("https://discord.gg/RQRZ7XkfCy")
+                end
+
+                Toolkit:Notify({
+                    Title = "Copied!",
+                    Content = "Discord invite copied.",
+                    Duration = 3,
+                    Icon = "solar:check-circle-bold",
+                    Type = "success",
+                })
+            end,
+        },
+        {
+            Title = "Test Notification",
+            Icon = "solar:bell-bold",
+            Callback = function()
+                Toolkit:Notify({
+                    Title = "Hello!",
+                    Content = "Glass notification with moving orbs inside.",
+                    Duration = 4,
+                    Icon = "solar:bell-bold",
+                })
+            end,
+        },
+    },
+})
+
+Home:Button({
+    Title = "Join Discord",
+    Desc = "Copy the invite link",
+    Icon = "solar:link-bold",
+    Text = "Copy",
+    ButtonIcon = "solar:copy-bold",
+    Locked = false,
+    Callback = function()
+        if setclipboard then
+            setclipboard("https://discord.gg/RQRZ7XkfCy")
+        end
+
+        Toolkit:Notify({
+            Title = "Copied!",
+            Content = "Discord invite copied.",
+            Duration = 3,
+            Icon = "solar:check-circle-bold",
+            Type = "success",
+        })
+    end,
+})
+
+local PermaLocked = {}
+
+table.insert(PermaLocked, Home:Button({
+    Title = "Premium Feature",
+    Desc = "This button is locked",
+    Icon = "solar:crown-bold",
+    Locked = true,
+    LockTitle = "Premium only",
+    Callback = function() end,
+}))
+
+table.insert(PermaLocked, Home:Button({
+    Title = "Coming Soon",
+    Desc = 'No LockTitle, so it just says "Locked"',
+    Icon = "solar:clock-circle-bold",
+    Locked = true,
+    Callback = function() end,
+}))
+
+Home:Code({
+    Title = "Loadstring",
+    Icon = "solar:code-bold",
+    Code = 'loadstring(game:HttpGet("TEST"))()',
+})
+
+local Farm = Home:Section({
+    Title = "Auto Farm"
+})
+
+local AutoFarm = Farm:Toggle({
+    Title = "Auto Farm",
+    Desc = "Automatically performs the task",
+    Icon = "solar:bolt-bold",
+    Flag = "AutoFarm",
+    Value = false,
+    Callback = function(V)
+        print("Auto Farm:", V)
+    end,
+})
+
+Farm:Toggle({
+    Title = "Auto Collect",
+    Desc = "Same toggle, checkbox look",
+    Icon = "solar:archive-check-bold",
+    Type = "Checkbox",
+    Flag = "AutoCollect",
+    Value = false,
+    Callback = function(V)
+        print("Auto Collect:", V)
+    end,
+})
+
+table.insert(PermaLocked, Farm:Toggle({
+    Title = "Auto Rebirth",
+    Desc = "Still locked",
+    Icon = "solar:refresh-bold",
+    Flag = "AutoRebirth",
+    Locked = true,
+    LockTitle = "Test",
+}))
+
+Farm:Slider({
+    Title = "Farm Speed",
+    Icon = "solar:speedometer-bold",
+    Flag = "FarmSpeed",
+    Step = 1,
+    Suffix = "x",
+    IsTextbox = true,
+    Value = {
+        Min = 1,
+        Max = 10,
+        Default = 5
+    },
+    Callback = function(V)
+        print("Speed:", V)
+    end,
+})
+
+Farm:Divider()
+
+Farm:Dropdown({
+    Title = "Target Item",
+    Icon = "solar:box-bold",
+    Flag = "TargetItem",
+    Values = { "Adobo", "Sinigang", "Lechon", "Halo-Halo", "Pancit" },
+    Value = "Adobo",
+    AllowNone = true,
+    Placeholder = "Pick an item",
+    Callback = function(V)
+        print("Target:", V)
+    end,
+})
+
+Farm:Dropdown({
+    Title = "Ingredients",
+    Icon = "solar:chef-hat-bold",
+    Flag = "Ingredients",
+    Multi = true,
+    AllowNone = true,
+    Values = { "Garlic", "Onion", "Soy Sauce", "Vinegar", "Pepper" },
+    Value = { "Garlic" },
+    Callback = function(Option)
+        print("Selected:", table.concat(Option, ", "))
+    end,
+})
+
+Farm:Dropdown({
+    Title = "Advanced Dropdown",
+    Desc = "Has icons, a divider and locked items",
+    Icon = "solar:list-bold",
+    Flag = "Advanced",
+    Values = {
+        {
+            Title = "Category A",
+            Callback = function()
+                print("Clicked A")
+            end
+        },
+        {
+            Title = "Category B",
+            Icon = "solar:home-2-bold",
+            Callback = function()
+                print("Clicked B")
+            end
+        },
+        {
+            Type = "Divider"
+        },
+        {
+            Title = "Category C",
+            Icon = "solar:star-bold",
+            Locked = true,
+            LockTitle = "Level 20"
+        },
+        {
+            Title = "Category D",
+            Icon = "solar:gem-bold",
+            Locked = true
+        },
+    },
+    Value = "Category A",
+    Callback = function(V)
+        print("Advanced:", V)
+    end,
+})
+
+local Player = Window:Tab({
+    Title = "Player",
+    Icon = "solar:user-bold",
+})
+
+Player:Slider({
+    Title = "WalkSpeed",
+    Icon = "solar:running-bold",
+    Flag = "WalkSpeed",
+    Value = {
+        Min = 16,
+        Max = 100,
+        Default = 16
+    },
+    Callback = function(V)
+        local Char = Players.LocalPlayer.Character
+        local Hum = Char and Char:FindFirstChildOfClass("Humanoid")
+
+        if Hum then
+            Hum.WalkSpeed = V
+        end
+    end,
+})
+
+Player:Input({
+    Title = "Custom Name",
+    Icon = "solar:user-bold",
+    Placeholder = "Enter a name...",
+    Flag = "CustomName",
+    Callback = function(V)
+        print("Name:", V)
+    end,
+})
+
+Player:Input({
+    Title = "Amount",
+    Icon = "solar:hashtag-bold",
+    Placeholder = "0",
+    Numeric = true,
+    Flag = "Amount",
+    Callback = function(V)
+        print("Amount:", tonumber(V))
+    end,
+})
+
+Player:Input({
+    Title = "Input",
+    Desc = "Input Description",
+    Value = "Default value",
+    Type = "Input",
+    Placeholder = "Enter text...",
+    Flag = "PlayerInput",
+    Callback = function(input)
+        print("text entered: " .. input)
+    end,
+})
+
+Player:Input({
+    Title = "Notes",
+    Desc = "Multi-line text box",
+    Icon = "solar:notebook-bold",
+    Type = "Textarea",
+    Placeholder = "Write something...",
+    Flag = "PlayerNotes",
+    Callback = function(input)
+        print("Notes:", input)
+    end,
+})
+
+Player:Keybind({
+    Title = "Fly Keybind",
+    Icon = "solar:keyboard-bold",
+    Flag = "FlyKey",
+    Value = "F",
+    Callback = function(KeyName)
+        Toolkit:Notify({
+            Title = "Keybind",
+            Content = KeyName .. " pressed",
+            Duration = 2,
+            Icon = "solar:keyboard-bold",
+        })
+    end,
+})
+
+Player:Space(6)
+
+Player:Colorpicker({
+    Title = "ESP Color",
+    Icon = "solar:palette-bold",
+    Flag = "ESPColor",
+    Default = Color3.fromRGB(40, 170, 196),
+    Callback = function(Col)
+        print("Color:", Col)
+    end,
+})
+
+Player:Colorpicker({
+    Title = "Tracer Color",
+    Desc = "Has an alpha bar",
+    Icon = "solar:paint-roller-bold",
+    Flag = "TracerColor",
+    Default = Color3.fromRGB(255, 138, 76),
+    Transparency = 0.3,
+    Callback = function(Col, Alpha)
+        print("Tracer:", Col, Alpha)
+    end,
+})
+
+local VIP = Window:Tab({
+    Title = "VIP",
+    Icon = "solar:crown-bold",
+    Locked = true,
+    LockTitle = "VIP only",
+})
+
+Window:Divider()
+Window:Section({
+    Title = "Extras"
+})
+
+local Demo = Window:Tab({
+    Title = "Demo",
+    Icon = "solar:stars-bold",
+})
+
+local Notifs = Demo:Section({
+    Title = "Notifications"
+})
+
+Notifs:Button({
+    Title = "Simple notification",
+    Icon = "solar:chat-round-dots-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify("Simple text notification")
+    end,
+})
+
+Notifs:Button({
+    Title = "With icon + title",
+    Icon = "solar:bell-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Heads up",
+            Content = "This notification has an icon and a title.",
+            Icon = "solar:info-circle-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+Notifs:Button({
+    Title = "Typed notifications",
+    Desc = "Type = success / info / warn / error colors the icon",
+    Icon = "solar:palette-bold",
+    Text = "Show",
+    Callback = function()
+        local List = {
+            { "Success", "success", "solar:check-circle-bold" },
+            { "Info", "info", "solar:info-circle-bold" },
+            { "Warning", "warn", "solar:danger-triangle-bold" },
+            { "Error", "error", "solar:close-circle-bold" },
+        }
+
+        for _, N in ipairs(List) do
+            Toolkit:Notify({
+                Title = N[1],
+                Content = "This is a " .. N[2] .. " notification.",
+                Type = N[2],
+                Icon = N[3],
+                Duration = 4,
+            })
+
+            task.wait(0.15)
+        end
+    end,
+})
+
+Notifs:Button({
+    Title = "Long text (gets truncated)",
+    Desc = "The card never grows, the text is cut with ...",
+    Icon = "solar:text-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "A very long title that does not fit inside the notification card",
+            Content = "This is a very long message to show that the notification keeps a fixed size. When the text is too long it gets cut off and ends with three dots instead of making the card taller.",
+            Icon = "solar:info-circle-bold",
+            Duration = 5,
+        })
+    end,
+})
+
+Notifs:Button({
+    Title = "Custom size (this one only)",
+    Desc = "Uses Width / Height on a single notification",
+    Icon = "solar:maximize-square-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Custom size",
+            Content = "This notification is 255 x 120.",
+            Icon = "solar:maximize-square-bold",
+            Duration = 4,
+            Width = 255,
+            Height = 120,
+        })
+    end,
+})
+
+Notifs:Button({
+    Title = "Spam 3 notifications",
+    Desc = "To see the stacking",
+    Icon = "solar:layers-bold",
+    Text = "Spam",
+    Callback = function()
+        for I = 1, 3 do
+            Toolkit:Notify({
+                Title = "Notification #" .. I,
+                Content = "Stacked at the bottom of the screen.",
+                Duration = 3 + I,
+                Icon = "solar:bell-bold",
+            })
+
+            task.wait(0.15)
+        end
+    end,
+})
+
+Notifs:Divider()
+
+Notifs:Dropdown({
+    Title = "Notification Side",
+    Flag = "NotifSide",
+    Values = { "Right", "Left" },
+    Value = "Right",
+    Callback = function(V)
+        Toolkit:SetNotificationPosition(V)
+    end,
+})
+
+Notifs:Toggle({
+    Title = "Raise notifications (mobile)",
+    Desc = "Lifts the stack higher from the bottom edge",
+    Icon = "solar:arrow-up-bold",
+    Flag = "NotifRaise",
+    Value = false,
+    Callback = function(V)
+        Toolkit:SetNotificationLower(V)
+    end,
+})
+
+Notifs:Divider()
+
+Notifs:Slider({
+    Title = "Notification Width",
+    Desc = "Applies to every new notification (including Tips)",
+    Flag = "NotifWidth",
+    Step = 1,
+    Suffix = " px",
+    Value = {
+        Min = 200,
+        Max = 600,
+        Default = NotifW
+    },
+    Callback = function(V)
+        NotifW = V
+        Toolkit:SetNotificationWidth(V)
+    end,
+})
+
+Notifs:Slider({
+    Title = "Notification Height",
+    Desc = "Applies to every new notification (including Tips)",
+    Flag = "NotifHeight",
+    Step = 5,
+    Suffix = " px",
+    Value = {
+        Min = 70,
+        Max = 240,
+        Default = NotifH
+    },
+    Callback = function(V)
+        NotifH = V
+        Toolkit:SetNotificationHeight(V)
+    end,
+})
+
+Notifs:Button({
+    Title = "Preview Tips notification",
+    Desc = "Shows a Tips notification with the current size",
+    Icon = "solar:lightbulb-bold",
+    Text = "Preview",
+    Callback = function()
+        local W, H = Toolkit:GetNotificationSize()
+
+        Toolkit:Notify({
+            Title = "Tips",
+            Content = "UI loaded. Press RightShift to hide/show. (" .. W .. " x " .. H .. ")",
+            Icon = "solar:lightbulb-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+local Dialogs = Demo:Section({
+    Title = "Dialogs"
+})
+
+Dialogs:Button({
+    Title = "Confirm dialog",
+    Icon = "solar:question-circle-bold",
+    Text = "Open",
+    Callback = function()
+        Window:Dialog({
+            Title = "CONFIRM",
+            Icon = "solar:question-circle-bold",
+            Content = "Do you want to continue?",
+            Buttons = {
+                {
+                    Title = "NO",
+                    Variant = "Secondary"
+                },
+                {
+                    Title = "YES",
+                    Callback = function()
+                        Toolkit:Notify({
+                            Title = "Confirmed",
+                            Content = "You chose to continue.",
+                            Icon = "solar:check-circle-bold",
+                            Type = "success",
+                            Duration = 3,
+                        })
+                    end,
+                },
+            },
+        })
+    end,
+})
+
+Dialogs:Button({
+    Title = "Popup (works without a window)",
+    Text = "Open",
+    Callback = function()
+        Toolkit:Popup({
+            Title = "POPUP",
+            Icon = "solar:info-circle-bold",
+            Content = "Library:Popup does not depend on a window.",
+            Buttons = {
+                {
+                    Title = "OK"
+                }
+            },
+        })
+    end,
+})
+
+local Ctrl = Demo:Section({
+    Title = "Controls"
+})
+
+local UnlockAllBtn
+
+Ctrl:Button({
+    Title = "Lock all elements",
+    Icon = "solar:lock-bold",
+    Text = "Lock",
+    Callback = function()
+        Window:LockAll()
+
+        if UnlockAllBtn then
+            UnlockAllBtn:Unlock()
+        end
+    end,
+})
+
+UnlockAllBtn = Ctrl:Button({
+    Title = "Unlock all elements",
+    Icon = "solar:lock-unlocked-bold",
+    Text = "Unlock",
+    Callback = function()
+        Window:UnlockAll()
+
+        for _, E in ipairs(PermaLocked) do
+            E:Lock()
+        end
+    end,
+})
+
+Ctrl:Button({
+    Title = "Unlock VIP tab",
+    Desc = "Uses Tab:Unlock()",
+    Icon = "solar:crown-bold",
+    Text = "Unlock",
+    Callback = function()
+        VIP:Unlock()
+
+        Toolkit:Notify({
+            Title = "VIP",
+            Content = "The VIP tab is now open.",
+            Icon = "solar:crown-bold",
+            Type = "success",
+            Duration = 3,
+        })
+    end,
+})
+
+Ctrl:Button({
+    Title = "Flip Auto Farm from code",
+    Desc = "Uses Toggle:Set()",
+    Icon = "solar:bolt-bold",
+    Text = "Flip",
+    Callback = function()
+        AutoFarm:Set(not AutoFarm.Value)
+    end,
+})
+
+Ctrl:Input({
+    Title = "Window title",
+    Icon = "solar:text-bold",
+    Placeholder = "New title...",
+    Flag = "WindowTitle",
+    Callback = function(V)
+        if V ~= "" then
+            Window:SetTitle(V)
+        end
+    end,
+})
+
+Ctrl:Input({
+    Title = "Window author",
+    Icon = "solar:user-bold",
+    Placeholder = "New author...",
+    Flag = "WindowAuthor",
+    Callback = function(V)
+        if V ~= "" then
+            Window:SetAuthor(V)
+        end
+    end,
+})
+
+Ctrl:Input({
+    Title = "Main logo icon",
+    Desc = "Solar icon name, ID, or rbxthumb://...",
+    Icon = "solar:gallery-bold",
+    Placeholder = "solar:home-2-bold / 0202020 / rbxthumb://...",
+    Flag = "LogoIcon",
+    Callback = function(V)
+        if V ~= "" then
+            Window:SetIcon(V)
+        end
+    end,
+})
+
+Ctrl:Input({
+    Title = "Open button icon",
+    Desc = "Solar icon name, ID, or rbxthumb://...",
+    Icon = "solar:cursor-square-bold",
+    Placeholder = "solar:home-2-bold / 0202020 / rbxthumb://...",
+    Flag = "OpenButtonIcon",
+    Callback = function(V)
+        if V ~= "" then
+            Window:OpenButton({
+                Icon = V
+            })
+        end
+    end,
+})
+
+Ctrl:Toggle({
+    Title = "Open button draggable",
+    Icon = "solar:move-to-folder-bold",
+    Flag = "OpenButtonDraggable",
+    Value = true,
+    Callback = function(V)
+        Window:OpenButton({
+            Draggable = V
+        })
+    end,
+})
+
+Ctrl:Toggle({
+    Title = "Show open button",
+    Desc = "When off, only the keybind can reopen the window",
+    Icon = "solar:eye-bold",
+    Flag = "ShowOpenButton",
+    Value = true,
+    Callback = function(V)
+        Window:OpenButton({
+            Enabled = V
+        })
+    end,
+})
+
+local Diagnostics = Window:Tab({
+    Title = "Diagnostics",
+    Icon = "solar:monitor-smartphone-bold",
+})
+
+local DeviceInfo = Diagnostics:Section({
+    Title = "Device Information"
+})
+
+DeviceInfo:Paragraph({
+    Title = "Runtime Diagnostics",
+    Desc = "Inspect FPS, ping, memory and local character status.",
+    Image = "solar:cpu-bolt-bold",
+    Color = "Blue",
+})
+
+DeviceInfo:Button({
+    Title = "Refresh Diagnostics",
+    Desc = "Read the current runtime values",
+    Icon = "solar:refresh-bold",
+    Text = "Refresh",
+    Callback = function()
+        local MemoryText = "Unavailable"
+
+        pcall(function()
+            MemoryText = string.format("%.1f MB", Stats:GetTotalMemoryUsageMb())
+        end)
+
+        local Platform = "Desktop"
+
+        if UserInputService.TouchEnabled then
+            Platform = "Touch"
+        elseif UserInputService.GamepadEnabled then
+            Platform = "Gamepad"
+        end
+
+        local Fps = GetFPS()
+        local Ping = GetPing()
+
+        Toolkit:Notify({
+            Title = "Diagnostics",
+            Content = Platform .. " | " .. Fps .. " FPS | " .. Ping .. "ms | Memory: " .. MemoryText,
+            Icon = "solar:monitor-smartphone-bold",
+            Duration = 5,
+        })
+    end,
+})
+
+DeviceInfo:Button({
+    Title = "Check Local Character",
+    Desc = "Check the character, humanoid and root part",
+    Icon = "solar:user-check-bold",
+    Text = "Check",
+    Callback = function()
+        local Character = Players.LocalPlayer.Character
+        local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+        local Root = Character and Character:FindFirstChild("HumanoidRootPart")
+
+        local Status
+
+        if Character and Humanoid and Root then
+            Status = "Character, Humanoid and root part are available."
+        elseif Character then
+            Status = "Character loaded, but one or more parts are missing."
+        else
+            Status = "Character is not currently loaded."
+        end
+
+        Toolkit:Notify({
+            Title = "Character Check",
+            Content = Status,
+            Icon = "solar:user-check-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+DeviceInfo:Button({
+    Title = "Check Core Services",
+    Desc = "Verify access to common Roblox services",
+    Icon = "solar:shield-check-bold",
+    Text = "Inspect",
+    Callback = function()
+        local ServiceNames = {
+            "Players",
+            "RunService",
+            "Stats",
+            "UserInputService",
+            "HttpService",
+            "Workspace",
+        }
+
+        local Available = 0
+
+        for _, ServiceName in ipairs(ServiceNames) do
+            local Success = pcall(function()
+                game:GetService(ServiceName)
+            end)
+
+            if Success then
+                Available += 1
+            end
+        end
+
+        Toolkit:Notify({
+            Title = "Service Check",
+            Content = tostring(Available) .. "/" .. tostring(#ServiceNames) .. " services accessible.",
+            Icon = "solar:shield-check-bold",
+            Type = Available == #ServiceNames and "success" or "warn",
+            Duration = 4,
+        })
+    end,
+})
+
+local PerformanceSettings = Diagnostics:Section({
+    Title = "Performance Monitor"
+})
+
+PerformanceSettings:Button({
+    Title = "Show Current FPS and Ping",
+    Desc = "Display the latest measured values",
+    Icon = "solar:chart-2-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Performance",
+            Content = tostring(GetFPS()) .. " FPS | " .. tostring(GetPing()) .. "ms",
+            Icon = "solar:cpu-bolt-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+PerformanceSettings:Button({
+    Title = "Create Diagnostic Tag",
+    Desc = "Add a tag showing the current FPS and ping",
+    Icon = "solar:tag-bold",
+    Text = "Create",
+    Callback = function()
+        Window:Tag({
+            Title = tostring(GetFPS()) .. " FPS | " .. tostring(GetPing()) .. "ms",
+            Icon = "solar:cpu-bolt-bold",
+            Color = "#8FAED5",
+            MinWidth = 96,
+        })
+    end,
+})
+
+local APIPlayground = Window:Tab({
+    Title = "API Playground",
+    Icon = "solar:code-square-bold",
+})
+
+local WindowAPI = APIPlayground:Section({
+    Title = "Window API"
+})
+
+WindowAPI:Button({
+    Title = "Test Dialog",
+    Desc = "Test Window:Dialog()",
+    Icon = "solar:chat-square-bold",
+    Text = "Open",
+    Callback = function()
+        Window:Dialog({
+            Title = "API Test",
+            Icon = "solar:code-square-bold",
+            Content = "This dialog was created using Window:Dialog().",
+            Buttons = {
+                {
+                    Title = "Close",
+                    Variant = "Secondary",
+                },
+                {
+                    Title = "Notify",
+                    Callback = function()
+                        Toolkit:Notify({
+                            Title = "Dialog Callback",
+                            Content = "The dialog callback ran.",
+                            Icon = "solar:check-circle-bold",
+                            Type = "success",
+                            Duration = 3,
+                        })
+                    end,
+                },
+            },
+        })
+    end,
+})
+
+WindowAPI:Button({
+    Title = "Test Popup",
+    Desc = "Test Toolkit:Popup()",
+    Icon = "solar:window-frame-bold",
+    Text = "Open",
+    Callback = function()
+        Toolkit:Popup({
+            Title = "Popup API",
+            Icon = "solar:info-circle-bold",
+            Content = "This popup was created using Toolkit:Popup().",
+            Buttons = {
+                {
+                    Title = "OK",
+                },
+            },
+        })
+    end,
+})
+
+WindowAPI:Button({
+    Title = "Add API Tag",
+    Desc = "Test Window:Tag()",
+    Icon = "solar:tag-bold",
+    Text = "Add",
+    Callback = function()
+        Window:Tag({
+            Title = "API OK",
+            Icon = "solar:check-circle-bold",
+            Color = "#8FAED5",
+        })
+
+        Toolkit:Notify({
+            Title = "Tag API",
+            Content = "Window:Tag() was called.",
+            Icon = "solar:check-circle-bold",
+            Type = "success",
+            Duration = 3,
+        })
+    end,
+})
+
+local ElementAPI = APIPlayground:Section({
+    Title = "Element API"
+})
+
+ElementAPI:Button({
+    Title = "Set Auto Farm",
+    Desc = "Test Toggle:Set()",
+    Icon = "solar:bolt-bold",
+    Text = "Toggle",
+    Callback = function()
+        AutoFarm:Set(not AutoFarm.Value)
+    end,
+})
+
+ElementAPI:Button({
+    Title = "Lock Auto Farm",
+    Desc = "Test element Lock()",
+    Icon = "solar:lock-bold",
+    Text = "Lock",
+    Callback = function()
+        AutoFarm:Lock()
+    end,
+})
+
+ElementAPI:Button({
+    Title = "Unlock Auto Farm",
+    Desc = "Test element Unlock()",
+    Icon = "solar:lock-unlocked-bold",
+    Text = "Unlock",
+    Callback = function()
+        AutoFarm:Unlock()
+    end,
+})
+
+ElementAPI:Button({
+    Title = "Unlock VIP Tab",
+    Desc = "Test Tab:Unlock()",
+    Icon = "solar:crown-bold",
+    Text = "Unlock",
+    Callback = function()
+        VIP:Unlock()
+
+        Toolkit:Notify({
+            Title = "VIP",
+            Content = "VIP:Unlock() was called.",
+            Icon = "solar:crown-bold",
+            Type = "success",
+            Duration = 3,
+        })
+    end,
+})
+
+local ControlLab = Window:Tab({
+    Title = "Control Lab",
+    Icon = "solar:widget-4-bold",
+})
+
+local ControlDemo = ControlLab:Section({
+    Title = "Additional Controls"
+})
+
+local ControlLabEnabled = false
+local ControlLabValue = 5
+
+ControlDemo:Toggle({
+    Title = "Demo Toggle",
+    Desc = "Example toggle with a separate callback",
+    Flag = "ControlLabToggle",
+    Value = false,
+    Callback = function(Value)
+        ControlLabEnabled = Value
+
+        print("Control Lab Toggle:", Value)
+    end,
+})
+
+ControlDemo:Slider({
+    Title = "Demo Slider",
+    Desc = "Example value from 1 to 100",
+    Icon = "solar:slider-horizontal-bold",
+    Flag = "ControlLabSlider",
+    Step = 1,
+    Suffix = "%",
+    Value = {
+        Min = 1,
+        Max = 100,
+        Default = 5,
+    },
+    Callback = function(Value)
+        ControlLabValue = Value
+
+        print("Control Lab Slider:", Value)
+    end,
+})
+
+ControlDemo:Dropdown({
+    Title = "Demo Dropdown",
+    Desc = "Select a test value",
+    Icon = "solar:list-check-bold",
+    Flag = "ControlLabDropdown",
+    Values = {
+        "Default",
+        "Performance",
+        "Minimal",
+        "Detailed",
+    },
+    Value = "Default",
+    AllowNone = true,
+    Placeholder = "Select a mode",
+    Callback = function(Value)
+        print("Control Lab Dropdown:", Value)
+    end,
+})
+
+ControlDemo:Input({
+    Title = "Demo Text Input",
+    Desc = "Enter a custom test value",
+    Icon = "solar:text-field-bold",
+    Placeholder = "Enter text...",
+    Flag = "ControlLabInput",
+    Callback = function(Value)
+        print("Control Lab Input:", Value)
+    end,
+})
+
+ControlDemo:Button({
+    Title = "Show Control Values",
+    Desc = "Display the current callback values",
+    Icon = "solar:clipboard-list-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Control Values",
+            Content = "Toggle: " .. tostring(ControlLabEnabled) .. " | Slider: " .. tostring(ControlLabValue),
+            Icon = "solar:clipboard-list-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+local NotificationLab = Window:Tab({
+    Title = "Notify Lab",
+    Icon = "solar:bell-bing-bold",
+})
+
+local NotifyPreview = NotificationLab:Section({
+    Title = "Notification Presets"
+})
+
+local NotifyDuration = 4
+
+NotifyPreview:Slider({
+    Title = "Duration",
+    Desc = "Duration for test notifications",
+    Icon = "solar:hourglass-bold",
+    Flag = "LabNotifyDuration",
+    Step = 1,
+    Suffix = " sec",
+    Value = {
+        Min = 1,
+        Max = 10,
+        Default = 4,
+    },
+    Callback = function(Value)
+        NotifyDuration = Value
+    end,
+})
+
+NotifyPreview:Button({
+    Title = "Show Info",
+    Icon = "solar:info-circle-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Information",
+            Content = "This is an information notification.",
+            Icon = "solar:info-circle-bold",
+            Type = "info",
+            Duration = NotifyDuration,
+        })
+    end,
+})
+
+NotifyPreview:Button({
+    Title = "Show Success",
+    Icon = "solar:check-circle-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Success",
+            Content = "The operation completed successfully.",
+            Icon = "solar:check-circle-bold",
+            Type = "success",
+            Duration = NotifyDuration,
+        })
+    end,
+})
+
+NotifyPreview:Button({
+    Title = "Show Warning",
+    Icon = "solar:danger-triangle-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Warning",
+            Content = "This is a warning notification.",
+            Icon = "solar:danger-triangle-bold",
+            Type = "warn",
+            Duration = NotifyDuration,
+        })
+    end,
+})
+
+NotifyPreview:Button({
+    Title = "Show Error",
+    Icon = "solar:close-circle-bold",
+    Text = "Show",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Error",
+            Content = "This is an error notification example.",
+            Icon = "solar:close-circle-bold",
+            Type = "error",
+            Duration = NotifyDuration,
+        })
+    end,
+})
+
+NotifyPreview:Button({
+    Title = "Preview Current Size",
+    Desc = "Read the configured notification size",
+    Text = "Preview",
+    Callback = function()
+        local W, H = Toolkit:GetNotificationSize()
+
+        Toolkit:Notify({
+            Title = "Notification Size",
+            Content = tostring(W) .. " x " .. tostring(H),
+            Duration = NotifyDuration,
+        })
+    end,
+})
+
+local NotifySettings = NotificationLab:Section({
+    Title = "Notification Settings"
+})
+
+NotifySettings:Dropdown({
+    Title = "Notification Position",
+    Icon = "solar:align-horizontal-center-bold",
+    Flag = "LabNotifyPosition",
+    Values = {
+        "Right",
+        "Left",
+    },
+    Value = "Right",
+    Callback = function(Value)
+        Toolkit:SetNotificationPosition(Value)
+    end,
+})
+
+NotifySettings:Toggle({
+    Title = "Raise Notifications",
+    Desc = "Use the library's notification lower-position setting",
+    Icon = "solar:arrow-up-bold",
+    Flag = "LabNotifyRaise",
+    Value = false,
+    Callback = function(Value)
+        Toolkit:SetNotificationLower(Value)
+    end,
+})
+
+NotifySettings:Slider({
+    Title = "Notification Width",
+    Desc = "Update the default notification width",
+    Flag = "LabNotifyWidth",
+    Step = 5,
+    Suffix = " px",
+    Value = {
+        Min = 200,
+        Max = 600,
+        Default = NotifW,
+    },
+    Callback = function(Value)
+        NotifW = Value
+        Toolkit:SetNotificationWidth(Value)
+    end,
+})
+
+NotifySettings:Slider({
+    Title = "Notification Height",
+    Desc = "Update the default notification height",
+    Flag = "LabNotifyHeight",
+    Step = 5,
+    Suffix = " px",
+    Value = {
+        Min = 70,
+        Max = 240,
+        Default = NotifH,
+    },
+    Callback = function(Value)
+        NotifH = Value
+        Toolkit:SetNotificationHeight(Value)
+    end,
+})
+
+local ConfigManager = Window:Tab({
+    Title = "Config Manager",
+    Icon = "solar:database-bold",
+})
+
+local ConfigInfo = ConfigManager:Section({
+    Title = "Configuration"
+})
+
+ConfigInfo:Paragraph({
+    Title = "Built-in Configuration Panel",
+    Desc = "Use the existing configuration panel in Settings to manage saved configurations. This tab does not assume additional undocumented save or load methods.",
+    Image = "solar:database-bold",
+    Color = "Blue",
+})
+
+ConfigInfo:Button({
+    Title = "Configuration Panel Info",
+    Desc = "Show where to find the existing panel",
+    Icon = "solar:info-circle-bold",
+    Text = "Info",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Configuration Manager",
+            Content = "Open Settings and use the existing Configuration panel.",
+            Icon = "solar:database-bold",
+            Duration = 4,
+        })
+    end,
+})
+
+local ConfigUtilities = ConfigManager:Section({
+    Title = "Utilities"
+})
+
+ConfigUtilities:Button({
+    Title = "Generate Session ID",
+    Desc = "Generate a unique ID for debugging",
+    Icon = "solar:hashtag-square-bold",
+    Text = "Generate",
+    Callback = function()
+        local SessionId = HttpService:GenerateGUID(false)
+
+        if setclipboard then
+            pcall(setclipboard, SessionId)
+        end
+
+        Toolkit:Notify({
+            Title = "Session ID",
+            Content = SessionId,
+            Icon = "solar:copy-bold",
+            Duration = 5,
+        })
+    end,
+})
+
+ConfigUtilities:Button({
+    Title = "Inspect Flagged Controls",
+    Desc = "Display the flags used by this example",
+    Icon = "solar:clipboard-list-bold",
+    Text = "Inspect",
+    Callback = function()
+        Toolkit:Notify({
+            Title = "Configuration Flags",
+            Content = "AutoFarm, AutoCollect, AutoRebirth, FarmSpeed, TargetItem, Ingredients, Advanced, WalkSpeed, CustomName, Amount, PlayerInput, PlayerNotes, FlyKey, ESPColor, TracerColor.",
+            Icon = "solar:clipboard-list-bold",
+            Duration = 6,
+        })
+    end,
+})
+
+local Settings = Window:Tab({
+    Title = "Settings",
+    Icon = "solar:settings-bold",
+})
+
+local UI = Settings:Section({
+    Title = "Interface"
+})
+
+UI:Toggle({
+    Title = "Transparent Mode",
+    Desc = "Glass look for the window, cards and notifications",
+    Icon = "solar:layers-bold",
+    Flag = "TransparentMode",
+    Value = StartTransparent,
+    Callback = function(V)
+        Window:SetTransparent(V)
+    end,
+})
+
+-- OPTIONAL: delete this toggle (and the blur slider) if you don't want Glassmorphism in your hub.
+-- Glassmorphism is PC only (black + white glossy liquid glass with a backdrop blur).
+-- On mobile it only turns on Transparent mode, nothing heavier.
+UI:Toggle({
+    Title = "Glassmorphism (PC only)",
+    Desc = "Glossy black & white liquid glass. On mobile it only uses Transparent mode",
+    Icon = "solar:window-frame-bold",
+    Flag = "Glassmorphism",
+    Value = false,
+    Callback = function(V)
+        local FullGlass = Window:SetGlassmorphism(V)
+
+        if V and not FullGlass then
+            Toolkit:Notify({
+                Title = "Glassmorphism",
+                Content = "PC only. Using Transparent mode on this device.",
+                Icon = "solar:monitor-smartphone-bold",
+                Type = "warn",
+                Duration = 3,
+            })
+        end
+    end,
+})
+
+UI:Slider({
+    Title = "Glass Blur",
+    Desc = "Acrylic blur behind the main window only (PC only, 0 = off)",
+    Icon = "solar:blur-bold",
+    Flag = "GlassBlur",
+    Step = 1,
+    Value = {
+        Min = 0,
+        Max = 40,
+        Default = 16
+    },
+    Callback = function(V)
+        Window:SetGlassBlur(V)
+    end,
+})
+
+UI:Dropdown({
+    Title = "Blur Mode",
+    Desc = "Window = blur only behind the main window. Screen = blur the whole game view (fallback)",
+    Icon = "solar:window-frame-bold",
+    Flag = "GlassBlurMode",
+    Values = { "Window", "Screen" },
+    Value = "Window",
+    Callback = function(V)
+        Window:SetGlassBlurMode(V)
+    end,
+})
+
+UI:Slider({
+    Title = "Background Opacity",
+    Desc = "0% = invisible backgrounds, 100% = fully visible",
+    Icon = "solar:sun-bold",
+    Flag = "BackgroundOpacity",
+    Step = 5,
+    Suffix = "%",
+    Value = {
+        Min = 0,
+        Max = 100,
+        Default = StartOpacity * 100
+    },
+    Callback = function(V)
+        Window:SetOpacity(V / 100)
+    end,
+})
+
+UI:Keybind({
+    Title = "Toggle UI key",
+    Desc = "Key that hides / shows the window",
+    Icon = "solar:keyboard-bold",
+    Flag = "ToggleUIKey",
+    Value = "RightShift",
+    ChangedCallback = function(Name)
+        if Name == "None" then
+            return
+        end
+
+        local Ok, Key = pcall(function()
+            return Enum.KeyCode[Name]
+        end)
+
+        if Ok and Key then
+            Window:SetToggleKey(Key)
+        end
+    end,
+})
+
+UI:Toggle({
+    Title = "Disable Moving Animation",
+    Desc = "Disables the moving animation",
+    Icon = "solar:running-bold",
+    Flag = "DisableMoving",
+    Value = false,
+    Callback = function(V)
+        Window:SetMovingAnimation(not V)
+    end,
+})
+
+UI:Toggle({
+    Title = "Disable Particles",
+    Desc = "Hides the floating background particles",
+    Icon = "solar:stars-bold",
+    Flag = "DisableParticles",
+    Value = false,
+    Callback = function(V)
+        Window:SetParticles(not V)
+    end,
+})
+
+UI:Toggle({
+    Title = "Hide Orbs",
+    Desc = "Hides the background orbs",
+    Icon = "solar:eye-closed-bold",
+    Flag = "HideOrbs",
+    Value = false,
+    Callback = function(V)
+        Window:SetOrbsHidden(V)
+    end,
+})
+
+UI:Toggle({
+    Title = "Disable Reflections",
+    Desc = "Hides the glossy highlight layers",
+    Icon = "solar:stars-minimalistic-bold",
+    Flag = "DisableReflections",
+    Value = false,
+    Callback = function(V)
+        Window:SetReflections(not V)
+    end,
+})
+
+local StatsSettings = Settings:Section({
+    Title = "FPS | Ping Tag"
+})
+
+StatsSettings:Toggle({
+    Title = "Show FPS | Ping Tag",
+    Desc = "Off = the tag is hidden and nothing runs in the background",
+    Icon = "solar:cpu-bolt-bold",
+    Flag = "ShowStatsTag",
+    Value = StatsConfig.Enabled,
+    Callback = function(V)
+        StatsConfig.Enabled = V
+
+        if V then
+            StartStats()
+        else
+            StopStats()
+        end
+    end,
+})
+
+StatsSettings:Colorpicker({
+    Title = "Good Color",
+    Desc = "Used when FPS and ping are healthy",
+    Icon = "solar:palette-bold",
+    Flag = "StatsColorGood",
+    Default = ToColor3(StatsConfig.Colors.Good),
+    Callback = function(Col)
+        StatsConfig.Colors.Good = Col
+
+        if StatsOn and LastLevel == "Good" then
+            ApplyStatsColor("Good")
+        end
+    end,
+})
+
+StatsSettings:Colorpicker({
+    Title = "Okay Color",
+    Desc = "Used when FPS is lowish or ping is high",
+    Icon = "solar:palette-bold",
+    Flag = "StatsColorOkay",
+    Default = ToColor3(StatsConfig.Colors.Okay),
+    Callback = function(Col)
+        StatsConfig.Colors.Okay = Col
+
+        if StatsOn and LastLevel == "Okay" then
+            ApplyStatsColor("Okay")
+        end
+    end,
+})
+
+StatsSettings:Colorpicker({
+    Title = "Bad Color",
+    Desc = "Used when FPS is very low or ping is very high",
+    Icon = "solar:palette-bold",
+    Flag = "StatsColorBad",
+    Default = ToColor3(StatsConfig.Colors.Bad),
+    Callback = function(Col)
+        StatsConfig.Colors.Bad = Col
+
+        if StatsOn and LastLevel == "Bad" then
+            ApplyStatsColor("Bad")
+        end
+    end,
+})
+
+local Orbs = Settings:Section({
+    Title = "Orb Image"
+})
+
+Orbs:Input({
+    Title = "Orb image",
+    Desc = "rbxthumb://type=Asset&id=ID&w=768&h=432 or just an ID",
+    Icon = "solar:link-bold",
+    Placeholder = "rbxthumb://type=Asset&id=IDHERE&w=768&h=432",
+    Flag = "OrbImage",
+    Callback = function(V)
+        if V == "" then
+            return
+        end
+
+        Window:SetOrbImage(V, 0.6)
+
+        Toolkit:Notify({
+            Title = "Orb image set",
+            Content = "Check the next notification to see it.",
+            Icon = "solar:gallery-bold",
+            Duration = 3,
+        })
+    end,
+})
+
+Orbs:Button({
+    Title = "Reset orbs",
+    Desc = "Back to the default blue-gray + cyan",
+    Icon = "solar:restart-bold",
+    Text = "Reset",
+    Callback = function()
+        Window:SetOrbImage(nil)
+
+        Toolkit:Notify({
+            Title = "Orbs reset",
+            Content = "Default orbs restored.",
+            Icon = "solar:check-circle-bold",
+            Type = "success",
+            Duration = 3,
+        })
+    end,
+})
+
+Settings:ConfigPanel({
+    Title = "Configuration",
+    Icon = "solar:floppy-disk-bold",
+})
+
+local Danger = Settings:Section({
+    Title = "Danger Zone"
+})
+
+Danger:Button({
+    Title = "Unload UI",
+    Desc = "Closes the window",
+    Icon = "solar:trash-bin-trash-bold",
+    Text = "Unload",
+    Variant = "Danger",
+    Callback = function()
+        Window:Dialog({
+            Title = "UNLOAD UI",
+            Icon = "solar:trash-bin-trash-bold",
+            Content = "Are you sure you want to close the UI?",
+            Buttons = {
+                {
+                    Title = "CANCEL",
+                    Variant = "Secondary"
+                },
+                {
+                    Title = "UNLOAD",
+                    Variant = "Danger",
+                    Callback = function()
+                        Window:Destroy()
+                    end,
+                },
+            },
+        })
+    end,
+})
+
+Window:OnClose(function()
+    print("Window minimized")
+end)
+
+Window:OnOpen(function()
+    print("Window opened")
+end)
+
+Window:OnDestroy(function()
+    StopStats()
+
+    print("Window destroyed")
+end)

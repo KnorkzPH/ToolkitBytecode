@@ -582,7 +582,6 @@ local AcrylicParts = {}
 local AcrylicFolder, AcrylicDof
 local SavedDof = {}
 local AcrylicBind = "ToolkitUIAcrylic"
-local ACRYLIC_INSET = 5            -- px: keeps the flat blur area inside the window's rounded corners
 local ACRYLIC_DISTANCE = 0.001
 
 local function DofStrength() return math.clamp(Library.GlassBlurSize / 20, 0, 1) end
@@ -610,28 +609,49 @@ local function SetScreenBlur(On)
 	end
 end
 
+local ACRYLIC_STRIPS = 6        -- strips per rounded corner: they follow the window's curve so nothing sticks out
+
+local function PlaceAcrylicRect(Part, Cam, X, Y, W, H)
+	if W < 0.5 or H < 0.5 then
+		Part.Parent = nil
+		return
+	end
+	local function ToWorld(P)
+		local R = Cam:ViewportPointToRay(P.X, P.Y)
+		return R.Origin + R.Direction * ACRYLIC_DISTANCE
+	end
+	local TL = ToWorld(Vector2.new(X, Y))
+	local TR = ToWorld(Vector2.new(X + W, Y))
+	local BR = ToWorld(Vector2.new(X + W, Y + H))
+	Part.Size = Vector3.new((TR - TL).Magnitude, (TR - BR).Magnitude, 0)
+	Part.CFrame = CFrame.fromMatrix((TL + BR) / 2, Cam.CFrame.XVector, Cam.CFrame.YVector, Cam.CFrame.ZVector)
+	Part.Parent = AcrylicFolder
+end
+
+-- The blur area is built from thin horizontal strips that follow the rounded corners of the main frame,
+-- so it fits the window exactly and nothing is blurred outside it.
 local function AcrylicRender()
 	local Cam = workspace.CurrentCamera
 	if not Cam then return end
-	for Win, Part in pairs(AcrylicParts) do
+	for Win, Set in pairs(AcrylicParts) do
 		local M = Win.Main
-		if not (M and M.Parent and Part.Parent) then
-			Part.Parent = nil
+		if not (M and M.Parent) then
+			for _, P in ipairs(Set) do P.Parent = nil end
 		else
-			local Pos = M.AbsolutePosition + Vector2.new(ACRYLIC_INSET, ACRYLIC_INSET)
-			local Size = M.AbsoluteSize - Vector2.new(ACRYLIC_INSET * 2, ACRYLIC_INSET * 2)
-			if Size.X > 1 and Size.Y > 1 then
-				local function ToWorld(P)
-					local R = Cam:ViewportPointToRay(P.X, P.Y)
-					return R.Origin + R.Direction * ACRYLIC_DISTANCE
-				end
-				local TL = ToWorld(Pos)
-				local TR = ToWorld(Pos + Vector2.new(Size.X, 0))
-				local BR = ToWorld(Pos + Size)
-				Part.Size = Vector3.new((TR - TL).Magnitude, (TR - BR).Magnitude, 0)
-				Part.CFrame = CFrame.fromMatrix((TL + BR) / 2, Cam.CFrame.XVector, Cam.CFrame.YVector, Cam.CFrame.ZVector)
-				Part.Parent = AcrylicFolder
+			local Pos, Size = M.AbsolutePosition, M.AbsoluteSize
+			local Scale = Win.RootScale and Win.RootScale.Scale or 1
+			local R = math.min(MAIN_RADIUS * Scale, Size.X / 2, Size.Y / 2)
+			local K = ACRYLIC_STRIPS
+			local H = R / K
+			for I = 1, K do
+				local YTop = (I - 1) * H
+				local Dy = R - YTop
+				local Inset = R - math.sqrt(math.max(R * R - Dy * Dy, 0))
+				local W = Size.X - Inset * 2
+				PlaceAcrylicRect(Set[I], Cam, Pos.X + Inset, Pos.Y + YTop, W, H + 0.5)                       -- top strips
+				PlaceAcrylicRect(Set[K + I], Cam, Pos.X + Inset, Pos.Y + Size.Y - YTop - H - 0.5, W, H + 0.5) -- bottom strips
 			end
+			PlaceAcrylicRect(Set[2 * K + 1], Cam, Pos.X, Pos.Y + R, Size.X, Size.Y - R * 2)                      -- middle
 		end
 	end
 end
@@ -661,8 +681,8 @@ end
 
 local function ClearAcrylicRig()
 	pcall(function() RunService:UnbindFromRenderStep(AcrylicBind) end)
-	for Win, Part in pairs(AcrylicParts) do
-		pcall(function() Part:Destroy() end)
+	for Win, Set in pairs(AcrylicParts) do
+		for _, P in ipairs(Set) do pcall(function() P:Destroy() end) end
 		AcrylicParts[Win] = nil
 	end
 	if AcrylicDof then pcall(function() AcrylicDof:Destroy() end) AcrylicDof = nil end
@@ -673,22 +693,27 @@ local function ClearAcrylicRig()
 	end
 end
 
-local function AddAcrylic(Win)
-	if AcrylicParts[Win] or not Win.Main then return end
-	if not EnsureAcrylicRig() then return end
+local function NewAcrylicPart()
 	local Part = New("Part", {
 		Name = "Body", Color = Color3.new(0, 0, 0), Material = Enum.Material.Glass, Size = Vector3.new(1, 1, 0),
 		Anchored = true, CanCollide = false, Locked = true, CastShadow = false, Transparency = 0.98,
 	})
 	New("SpecialMesh", { MeshType = Enum.MeshType.Brick, Offset = Vector3.new(0, 0, -0.000001) }, Part)
-	Part.Parent = AcrylicFolder
-	AcrylicParts[Win] = Part
+	return Part
+end
+
+local function AddAcrylic(Win)
+	if AcrylicParts[Win] or not Win.Main then return end
+	if not EnsureAcrylicRig() then return end
+	local Set = {}
+	for I = 1, ACRYLIC_STRIPS * 2 + 1 do Set[I] = NewAcrylicPart() end
+	AcrylicParts[Win] = Set
 end
 
 local function RemoveAcrylic(Win)
-	local Part = AcrylicParts[Win]
-	if Part then
-		pcall(function() Part:Destroy() end)
+	local Set = AcrylicParts[Win]
+	if Set then
+		for _, P in ipairs(Set) do pcall(function() P:Destroy() end) end
 		AcrylicParts[Win] = nil
 	end
 end
